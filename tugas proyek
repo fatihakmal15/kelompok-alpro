@@ -1,0 +1,352 @@
+#include <iostream>
+#include <vector>
+#include <string>
+#include <ctime>
+#include <fstream>
+#include <limits> // Untuk validasi input
+using namespace std;
+
+// Struct untuk pengguna
+struct User {
+    string username;
+    string password;
+    bool isAdmin = false;
+};
+
+// Struct untuk pesanan laundry
+struct Order {
+    string username;
+    int serviceType; // 1: Cuci Kering, 2: Cuci Lipat, 3: Setrika, 4: Express
+    float weight;
+    float pricePerKg;
+    float totalPrice;
+    string note;
+    string address;
+    string deliveryStatus;
+    string paymentMethod;
+    float distance; // km
+    float deliveryFee;
+    time_t orderTime;
+    string orderID;
+    int rating = 0;
+    string review;
+};
+
+// Variabel global
+vector<User> users;
+vector<Order> orders;
+
+// Deklarasi fungsi
+void registrasi();
+bool login(string &loggedInUser);
+void tampilkanMenu();
+void pesanLaundry(string username);
+void lihatRiwayat(string username);
+void simpanData();
+void muatData();
+void beriPenilaian(string username);
+
+// Fungsi validasi input angka
+int validIntInput() {
+    int value;
+    while (!(cin >> value)) {
+        cin.clear();
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        cout << "Input tidak valid! Masukkan angka: ";
+    }
+    return value;
+}
+
+float validFloatInput() {
+    float value;
+    while (!(cin >> value)) {
+        cin.clear();
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        cout << "Input tidak valid! Masukkan angka: ";
+    }
+    return value;
+}
+
+int main() {
+    muatData();
+
+    cout << "=== SELAMAT DATANG DI LAUNDRY APP ===" << endl;
+    cout << "Jumlah user dimuat: " << users.size() << endl;
+    cout << "1. Login\n2. Registrasi\nPilih: ";
+    int pilihan;
+    cin >> pilihan;
+
+    string loggedInUser;
+    if (pilihan == 2) {
+        registrasi();
+    } else {
+        if (!login(loggedInUser)) {
+            cout << "Login gagal!" << endl;
+            return 0;
+        }
+    }
+
+    while (true) {
+        tampilkanMenu();
+        int pilih;
+        cin >> pilih;
+
+        if (pilih == 1) {
+            pesanLaundry(loggedInUser);
+            simpanData(); // Simpan setelah pesan
+        } else if (pilih == 2) {
+            lihatRiwayat(loggedInUser);
+        } else if (pilih == 3) {
+            beriPenilaian(loggedInUser);
+            simpanData(); // Simpan setelah ulasan
+        } else if (pilih == 4) {
+            simpanData();
+            cout << "Terima kasih! Sampai jumpa." << endl;
+            break;
+        } else {
+            cout << "Pilihan tidak valid!" << endl;
+        }
+    }
+
+    return 0;
+}
+
+// Fungsi login
+bool login(string &loggedInUser) {
+    string user, pass;
+    cout << "Username: ";
+    cin >> user;
+    cout << "Password: ";
+    cin >> pass;
+
+    for (auto u : users) {
+        if (u.username == user && u.password == pass) {
+            loggedInUser = user;
+            return true;
+        }
+    }
+    return false;
+}
+
+// Fungsi registrasi
+void registrasi() {
+    User newUser;
+    cout << "Username: ";
+    cin >> newUser.username;
+    cout << "Password: ";
+    cin >> newUser.password;
+
+    users.push_back(newUser);
+    cout << "Registrasi berhasil!\n";
+
+    // Simpan langsung ke file agar bisa login nanti
+    simpanData();
+}
+
+// Menu utama
+void tampilkanMenu() {
+    cout << "\n=== MENU UTAMA ===\n";
+    cout << "1. Pesan Laundry\n2. Lihat Riwayat\n3. Beri Ulasan\n4. Keluar\nPilih: ";
+}
+
+// Fungsi pesan laundry
+void pesanLaundry(string username) {
+    Order newOrder;
+    newOrder.username = username;
+    newOrder.orderID = "ORD-" + to_string(rand() % 100000 + 100000); // Agar selalu 6 digit
+
+    cout << "Pilih layanan:\n1. Cuci Kering (Rp10,000/kg)\n2. Cuci Lipat (Rp8,000/kg)\n3. Setrika (Rp5,000/kg)\n4. Express (Rp15,000/kg)\nPilih: ";
+    newOrder.serviceType = validIntInput();
+
+    switch (newOrder.serviceType) {
+        case 1: newOrder.pricePerKg = 10000; break;
+        case 2: newOrder.pricePerKg = 8000; break;
+        case 3: newOrder.pricePerKg = 5000; break;
+        case 4: newOrder.pricePerKg = 15000; break;
+        default: newOrder.pricePerKg = 0;
+    }
+
+    cout << "Berat pakaian (kg): ";
+    newOrder.weight = validFloatInput();
+    newOrder.totalPrice = newOrder.pricePerKg * newOrder.weight;
+
+    cout << "Catatan tambahan (opsional): ";
+    cin.ignore();
+    getline(cin, newOrder.note);
+
+    cout << "Alamat pengiriman: ";
+    getline(cin, newOrder.address);
+
+    cout << "Jarak pengiriman (km): ";
+    newOrder.distance = validFloatInput();
+    newOrder.deliveryFee = newOrder.distance * 2000;
+    newOrder.totalPrice += newOrder.deliveryFee;
+
+    cout << "Pilih pembayaran (1: Tunai / 2: Transfer): ";
+    int pay;
+    pay = validIntInput();
+    newOrder.paymentMethod = (pay == 1) ? "Tunai" : "Transfer";
+
+    newOrder.orderTime = time(0);
+    newOrder.deliveryStatus = "Pending";
+
+    orders.push_back(newOrder);
+
+    cout << "\nPesanan Berhasil Dibuat!\n";
+    cout << "Order ID: " << newOrder.orderID << endl;
+    cout << "Total Harga: Rp" << newOrder.totalPrice << endl;
+    cout << "Delivery Fee: Rp" << newOrder.deliveryFee << endl;
+    cout << "Alamat: " << newOrder.address << endl;
+}
+
+// Fungsi lihat riwayat
+void lihatRiwayat(string username) {
+    bool found = false;
+    for (auto o : orders) {
+        if (o.username == username) {
+            found = true;
+            cout << "\nOrder ID: " << o.orderID << endl;
+            cout << "Layanan: ";
+            switch (o.serviceType) {
+                case 1: cout << "Cuci Kering"; break;
+                case 2: cout << "Cuci Lipat"; break;
+                case 3: cout << "Setrika"; break;
+                case 4: cout << "Express"; break;
+                default: cout << "Tidak diketahui";
+            }
+            cout << "\nBerat: " << o.weight << " kg" << endl;
+            cout << "Harga per kg: Rp" << o.pricePerKg << endl;
+            cout << "Biaya Kirim: Rp" << o.deliveryFee << endl;
+            cout << "Total: Rp" << o.totalPrice << endl;
+            cout << "Tanggal: " << ctime(&o.orderTime);
+            cout << "Status Pengiriman: " << o.deliveryStatus << endl;
+            if (o.rating > 0) {
+                cout << "Rating: " << o.rating << "/5\nUlasan: " << o.review << endl;
+            }
+        }
+    }
+    if (!found)
+        cout << "Belum ada riwayat pesanan.\n";
+}
+
+// Fungsi beri penilaian
+void beriPenilaian(string username) {
+    cout << "Masukkan Order ID yang ingin diberi ulasan: ";
+    string orderId;
+    cin >> orderId;
+
+    bool found = false;
+    for (auto &o : orders) {
+        if (o.username == username && o.orderID == orderId) {
+            cout << "Beri rating (1-5): ";
+            o.rating = validIntInput();
+            if (o.rating < 1 || o.rating > 5) {
+                cout << "Rating harus antara 1 sampai 5.\n";
+                continue;
+            }
+            cout << "Masukkan ulasan: ";
+            cin.ignore();
+            getline(cin, o.review);
+            cout << "Ulasan berhasil ditambahkan!" << endl;
+            found = true;
+            break;
+        }
+    }
+    if (!found)
+        cout << "Order ID tidak ditemukan atau belum selesai." << endl;
+}
+
+// Simpan data ke file
+void simpanData() {
+    ofstream outFile("orders.txt");
+    for (auto o : orders) {
+        outFile << o.username << ","
+                << o.orderID << ","
+                << o.serviceType << ","
+                << o.weight << ","
+                << o.pricePerKg << ","
+                << o.totalPrice << ","
+                << o.note << ","
+                << o.address << ","
+                << o.distance << ","
+                << o.deliveryFee << ","
+                << o.paymentMethod << ","
+                << o.orderTime << ","
+                << o.deliveryStatus << ","
+                << o.rating << ","
+                << o.review << "\n";
+    }
+    outFile.close();
+
+    ofstream userFile("users.txt");
+    for (auto u : users) {
+        userFile << u.username << "," << u.password << "," << (u.isAdmin ? "1" : "0") << "\n";
+    }
+    userFile.close();
+}
+
+// Muat data dari file
+void muatData() {
+    ifstream inFile("orders.txt");
+    string line;
+    while (getline(inFile, line)) {
+        Order o;
+        size_t pos = 0;
+        string token;
+        vector<string> tokens;
+
+        while ((pos = line.find(",")) != string::npos) {
+            token = line.substr(0, pos);
+            tokens.push_back(token);
+            line.erase(0, pos + 1);
+        }
+        tokens.push_back(line); // Ambil sisa teks setelah koma terakhir
+
+        if (tokens.size() >= 13) {
+            o.username = tokens[0];
+            o.orderID = tokens[1];
+            o.serviceType = stoi(tokens[2]);
+            o.weight = stof(tokens[3]);
+            o.pricePerKg = stof(tokens[4]);
+            o.totalPrice = stof(tokens[5]);
+            o.note = tokens[6];
+            o.address = tokens[7];
+            o.distance = stof(tokens[8]);
+            o.deliveryFee = stof(tokens[9]);
+            o.paymentMethod = tokens[10];
+            o.orderTime = static_cast<time_t>(stol(tokens[11]));
+            o.deliveryStatus = tokens[12];
+
+            if (tokens.size() >= 14) {
+                o.rating = stoi(tokens[13]);
+                if (tokens.size() >= 15)
+                    o.review = tokens[14];
+            }
+
+            orders.push_back(o);
+        }
+    }
+    inFile.close();
+
+    ifstream userFile("users.txt");
+    string userLine;
+    while (getline(userFile, userLine)) {
+        User u;
+        vector<string> tokens;
+        size_t pos = 0;
+
+        while ((pos = userLine.find(",")) != string::npos) {
+            tokens.push_back(userLine.substr(0, pos));
+            userLine.erase(0, pos + 1);
+        }
+        tokens.push_back(userLine); // Ambil sisa teks
+
+        if (tokens.size() >= 3) {
+            u.username = tokens[0];
+            u.password = tokens[1];
+            u.isAdmin = (tokens[2] == "1");
+            users.push_back(u);
+        }
+    }
+    userFile.close();
+}
