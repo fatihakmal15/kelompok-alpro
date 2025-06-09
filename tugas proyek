@@ -1,352 +1,873 @@
 #include <iostream>
-#include <vector>
 #include <string>
-#include <ctime>
+#include <limits>
 #include <fstream>
-#include <limits> // Untuk validasi input
+#include <sstream>
+#include <cstdlib>
+#include <ctime>
+#include <iomanip>
+#include <vector>
+
 using namespace std;
 
-// Struct untuk pengguna
+const int MAX_ALAT = 100;
+const int MAX_PENYEWA = 100;
+const int MAX_ALAT_PER_SEWA = 10;
+const float DENDA_PER_HARI = 0.1; 
+const float DISKON_REGULER = 0.05; 
+const int MIN_HARI_DISKON = 3; 
+
+struct AlatCamping {
+    int id;
+    string nama;
+    string kategori;
+    float hargaPerHari;
+    int stok;
+    int totalDisewa;
+    bool tersedia;
+};
+
+struct Penyewa {
+    int id;
+    string nama;
+    string noHP;
+    int alatDisewa[MAX_ALAT_PER_SEWA];
+    int jumlahSewa[MAX_ALAT_PER_SEWA];
+    int jumlahJenisAlat;
+    time_t tanggalSewa;
+    time_t tanggalKembali;
+    int durasiSewa; // in days
+    bool sudahKembali;
+    bool isReguler;
+    float totalHarga;
+    float totalDenda;
+    float totalDiskon;
+};
+
+AlatCamping daftarAlat[MAX_ALAT];
+int jumlahAlat = 0;
+
+Penyewa daftarPenyewa[MAX_PENYEWA];
+int jumlahPenyewa = 0;
+
 struct User {
     string username;
     string password;
-    bool isAdmin = false;
+    string role;
 };
 
-// Struct untuk pesanan laundry
-struct Order {
-    string username;
-    int serviceType; // 1: Cuci Kering, 2: Cuci Lipat, 3: Setrika, 4: Express
-    float weight;
-    float pricePerKg;
-    float totalPrice;
-    string note;
-    string address;
-    string deliveryStatus;
-    string paymentMethod;
-    float distance; // km
-    float deliveryFee;
-    time_t orderTime;
-    string orderID;
-    int rating = 0;
-    string review;
+User daftarUser[] = {
+    {"admin", "admin123", "admin"},
+    {"kasir", "kasir123", "kasir"}
 };
 
-// Variabel global
-vector<User> users;
-vector<Order> orders;
+User userAktif;
+bool isLoggedIn = false;
 
-// Deklarasi fungsi
-void registrasi();
-bool login(string &loggedInUser);
-void tampilkanMenu();
-void pesanLaundry(string username);
-void lihatRiwayat(string username);
-void simpanData();
-void muatData();
-void beriPenilaian(string username);
-
-// Fungsi validasi input angka
-int validIntInput() {
-    int value;
-    while (!(cin >> value)) {
-        cin.clear();
-        cin.ignore(numeric_limits<streamsize>::max(), '\n');
-        cout << "Input tidak valid! Masukkan angka: ";
-    }
-    return value;
+// Helper functions
+string formatTanggal(time_t t) {
+    if (t == 0) return "Belum dikembalikan";
+    char buffer[80];
+    struct tm* timeinfo = localtime(&t);
+    strftime(buffer, sizeof(buffer), "%d/%m/%Y", timeinfo);
+    return string(buffer);
 }
 
-float validFloatInput() {
-    float value;
-    while (!(cin >> value)) {
-        cin.clear();
-        cin.ignore(numeric_limits<streamsize>::max(), '\n');
-        cout << "Input tidak valid! Masukkan angka: ";
+time_t parseTanggal(const string& dateStr) {
+    struct tm tm = {0};
+    if (sscanf(dateStr.c_str(), "%d/%d/%d", &tm.tm_mday, &tm.tm_mon, &tm.tm_year) != 3) {
+        return 0;
     }
-    return value;
+    tm.tm_mon -= 1;
+    tm.tm_year -= 1900;
+    return mktime(&tm);
 }
 
-int main() {
-    muatData();
+int hitungHariTerlambat(time_t kembali, time_t seharusnya) {
+    if (kembali == 0 || seharusnya == 0) return 0;
+    return max(0, (int)difftime(kembali, seharusnya) / (60 * 60 * 24));
+}
 
-    cout << "=== SELAMAT DATANG DI LAUNDRY APP ===" << endl;
-    cout << "Jumlah user dimuat: " << users.size() << endl;
-    cout << "1. Login\n2. Registrasi\nPilih: ";
-    int pilihan;
-    cin >> pilihan;
 
-    string loggedInUser;
-    if (pilihan == 2) {
-        registrasi();
-    } else {
-        if (!login(loggedInUser)) {
-            cout << "Login gagal!" << endl;
-            return 0;
-        }
+void loadDataAlatDariFile(const char* namaFile) {
+    jumlahAlat = 0;
+    ifstream file(namaFile);
+    if (!file.is_open()) {
+        cout << "File " << namaFile << " tidak ditemukan. Data alat kosong.\n";
+        return;
     }
-
-    while (true) {
-        tampilkanMenu();
-        int pilih;
-        cin >> pilih;
-
-        if (pilih == 1) {
-            pesanLaundry(loggedInUser);
-            simpanData(); // Simpan setelah pesan
-        } else if (pilih == 2) {
-            lihatRiwayat(loggedInUser);
-        } else if (pilih == 3) {
-            beriPenilaian(loggedInUser);
-            simpanData(); // Simpan setelah ulasan
-        } else if (pilih == 4) {
-            simpanData();
-            cout << "Terima kasih! Sampai jumpa." << endl;
-            break;
-        } else {
-            cout << "Pilihan tidak valid!" << endl;
-        }
+    string line;
+    while (getline(file, line) && jumlahAlat < MAX_ALAT) {
+        istringstream iss(line);
+        string token;
+        AlatCamping alat;
+        getline(iss, token, ';'); alat.id = atoi(token.c_str());
+        getline(iss, alat.nama, ';');
+        getline(iss, alat.kategori, ';');
+        getline(iss, token, ';'); alat.hargaPerHari = atof(token.c_str());
+        getline(iss, token, ';'); alat.stok = atoi(token.c_str());
+        getline(iss, token, ';'); alat.totalDisewa = atoi(token.c_str());
+        getline(iss, token, ';'); alat.tersedia = (token == "1");
+        daftarAlat[jumlahAlat++] = alat;
     }
+    file.close();
+}
 
-    return 0;
+void simpanDataAlatKeFile(const char* namaFile) {
+    ofstream file(namaFile);
+    if (!file.is_open()) {
+        cout << "Gagal membuka file untuk menyimpan data alat!\n";
+        return;
+    }
+    for (int i = 0; i < jumlahAlat; i++) {
+        file << daftarAlat[i].id << ";"
+             << daftarAlat[i].nama << ";"
+             << daftarAlat[i].kategori << ";"
+             << daftarAlat[i].hargaPerHari << ";"
+             << daftarAlat[i].stok << ";"
+             << daftarAlat[i].totalDisewa << ";"
+             << (daftarAlat[i].tersedia ? "1" : "0") << "\n";
+    }
+    file.close();
+}
+
+void simpanDataPenyewaKeFile(const char* namaFile) {
+    ofstream file(namaFile);
+    if (!file.is_open()) {
+        cout << "Gagal membuka file untuk menyimpan data penyewa!\n";
+        return;
+    }
+    for (int i = 0; i < jumlahPenyewa; i++) {
+        Penyewa p = daftarPenyewa[i];
+        file << p.id << ";"
+             << p.nama << ";"
+             << p.noHP << ";"
+             << p.jumlahJenisAlat << ";"
+             << (p.sudahKembali ? "1" : "0") << ";"
+             << p.tanggalSewa << ";"
+             << p.tanggalKembali << ";"
+             << p.durasiSewa << ";"
+             << (p.isReguler ? "1" : "0") << ";"
+             << p.totalHarga << ";"
+             << p.totalDenda << ";"
+             << p.totalDiskon << ";";
+        for (int j = 0; j < p.jumlahJenisAlat; j++) {
+            file << p.alatDisewa[j] << "," << p.jumlahSewa[j];
+            if (j < p.jumlahJenisAlat - 1) file << " ";
+        }
+        file << "\n";
+    }
+    file.close();
+}
+
+void muatDataPenyewaDariFile(const char* namaFile) {
+    jumlahPenyewa = 0;
+    ifstream file(namaFile);
+    if (!file.is_open()) {
+        cout << "File " << namaFile << " tidak ditemukan. Data penyewa kosong.\n";
+        return;
+    }
+    string line;
+    while (getline(file, line) && jumlahPenyewa < MAX_PENYEWA) {
+        istringstream iss(line);
+        string token;
+        Penyewa penyewa;
+        getline(iss, token, ';'); penyewa.id = atoi(token.c_str());
+        getline(iss, penyewa.nama, ';');
+        getline(iss, penyewa.noHP, ';');
+        getline(iss, token, ';'); penyewa.jumlahJenisAlat = atoi(token.c_str());
+        getline(iss, token, ';'); penyewa.sudahKembali = (token == "1");
+        getline(iss, token, ';'); penyewa.tanggalSewa = atol(token.c_str());
+        getline(iss, token, ';'); penyewa.tanggalKembali = atol(token.c_str());
+        getline(iss, token, ';'); penyewa.durasiSewa = atoi(token.c_str());
+        getline(iss, token, ';'); penyewa.isReguler = (token == "1");
+        getline(iss, token, ';'); penyewa.totalHarga = atof(token.c_str());
+        getline(iss, token, ';'); penyewa.totalDenda = atof(token.c_str());
+        getline(iss, token, ';'); penyewa.totalDiskon = atof(token.c_str());
+        
+        string alatData;
+        getline(iss, alatData);
+        istringstream alatStream(alatData);
+        string pair;
+        int idx = 0;
+        while (getline(alatStream, pair, ' ') && idx < MAX_ALAT_PER_SEWA) {
+            istringstream pairStream(pair);
+            string idStr, qtyStr;
+            getline(pairStream, idStr, ',');
+            getline(pairStream, qtyStr, ',');
+            penyewa.alatDisewa[idx] = atoi(idStr.c_str());
+            penyewa.jumlahSewa[idx] = atoi(qtyStr.c_str());
+            idx++;
+        }
+        daftarPenyewa[jumlahPenyewa++] = penyewa;
+    }
+    file.close();
 }
 
 // Fungsi login
-bool login(string &loggedInUser) {
-    string user, pass;
+void login() {
+    system("cls");
+    cout << "====================================\n";
+    cout << "          LOGIN SISTEM              \n";
+    cout << "====================================\n";
+    string username, password;
     cout << "Username: ";
-    cin >> user;
+    cin >> username;
     cout << "Password: ";
-    cin >> pass;
-
-    for (auto u : users) {
-        if (u.username == user && u.password == pass) {
-            loggedInUser = user;
-            return true;
+    cin >> password;
+    for (int i = 0; i < sizeof(daftarUser)/sizeof(daftarUser[0]); i++) {
+        if (daftarUser[i].username == username && daftarUser[i].password == password) {
+            userAktif = daftarUser[i];
+            isLoggedIn = true;
+            cout << "\nLogin berhasil! Selamat datang, " << userAktif.username << "!\n";
+            system("pause");
+            return;
         }
     }
-    return false;
+    cout << "\nLogin gagal! Username atau password salah.\n";
+    system("pause");
 }
 
-// Fungsi registrasi
-void registrasi() {
-    User newUser;
-    cout << "Username: ";
-    cin >> newUser.username;
-    cout << "Password: ";
-    cin >> newUser.password;
-
-    users.push_back(newUser);
-    cout << "Registrasi berhasil!\n";
-
-    // Simpan langsung ke file agar bisa login nanti
-    simpanData();
+void logout() {
+    isLoggedIn = false;
+    cout << "Anda telah logout.\n";
+    system("pause");
 }
 
-// Menu utama
-void tampilkanMenu() {
-    cout << "\n=== MENU UTAMA ===\n";
-    cout << "1. Pesan Laundry\n2. Lihat Riwayat\n3. Beri Ulasan\n4. Keluar\nPilih: ";
-}
-
-// Fungsi pesan laundry
-void pesanLaundry(string username) {
-    Order newOrder;
-    newOrder.username = username;
-    newOrder.orderID = "ORD-" + to_string(rand() % 100000 + 100000); // Agar selalu 6 digit
-
-    cout << "Pilih layanan:\n1. Cuci Kering (Rp10,000/kg)\n2. Cuci Lipat (Rp8,000/kg)\n3. Setrika (Rp5,000/kg)\n4. Express (Rp15,000/kg)\nPilih: ";
-    newOrder.serviceType = validIntInput();
-
-    switch (newOrder.serviceType) {
-        case 1: newOrder.pricePerKg = 10000; break;
-        case 2: newOrder.pricePerKg = 8000; break;
-        case 3: newOrder.pricePerKg = 5000; break;
-        case 4: newOrder.pricePerKg = 15000; break;
-        default: newOrder.pricePerKg = 0;
+int hitungDisewa(int idAlat) {
+    int total = 0;
+    for (int i = 0; i < jumlahPenyewa; i++) {
+        if (!daftarPenyewa[i].sudahKembali) {
+            for (int j = 0; j < daftarPenyewa[i].jumlahJenisAlat; j++) {
+                if (daftarPenyewa[i].alatDisewa[j] == idAlat) {
+                    total += daftarPenyewa[i].jumlahSewa[j];
+                }
+            }
+        }
     }
+    return total;
+}
 
-    cout << "Berat pakaian (kg): ";
-    newOrder.weight = validFloatInput();
-    newOrder.totalPrice = newOrder.pricePerKg * newOrder.weight;
+void tampilkanDaftarAlat() {
+    system("cls");
+    cout << "====================================\n";
+    cout << "       DAFTAR ALAT CAMPING         \n";
+    cout << "====================================\n";
+    cout << "ID | Nama Alat           | Kategori   | Harga/Hari | Stok | Disewa\n";
+    cout << "---------------------------------------------------------------\n";
+    for (int i = 0; i < jumlahAlat; i++) {
+        AlatCamping a = daftarAlat[i];
+        cout << a.id << "  | " << a.nama;
+        for (int j = 0; j < 20 - (int)a.nama.size(); j++) cout << " ";
+        cout << "| " << a.kategori;
+        for (int j = 0; j < 11 - (int)a.kategori.size(); j++) cout << " ";
+        cout << "| " << a.hargaPerHari << "    | "
+             << a.stok << "   | " << hitungDisewa(a.id) << "\n";
+    }
+    cout << "====================================\n";
+    system("pause");
+}
 
-    cout << "Catatan tambahan (opsional): ";
+void tambahAlat() {
+    system("cls");
+    cout << "====================================\n";
+    cout << "          TAMBAH ALAT BARU          \n";
+    cout << "====================================\n";
+    if (jumlahAlat >= MAX_ALAT) {
+        cout << "Maaf, kapasitas penuh. Tidak bisa menambah alat baru.\n";
+        system("pause");
+        return;
+    }
+    AlatCamping alatBaru;
+    alatBaru.id = jumlahAlat + 1;
     cin.ignore();
-    getline(cin, newOrder.note);
-
-    cout << "Alamat pengiriman: ";
-    getline(cin, newOrder.address);
-
-    cout << "Jarak pengiriman (km): ";
-    newOrder.distance = validFloatInput();
-    newOrder.deliveryFee = newOrder.distance * 2000;
-    newOrder.totalPrice += newOrder.deliveryFee;
-
-    cout << "Pilih pembayaran (1: Tunai / 2: Transfer): ";
-    int pay;
-    pay = validIntInput();
-    newOrder.paymentMethod = (pay == 1) ? "Tunai" : "Transfer";
-
-    newOrder.orderTime = time(0);
-    newOrder.deliveryStatus = "Pending";
-
-    orders.push_back(newOrder);
-
-    cout << "\nPesanan Berhasil Dibuat!\n";
-    cout << "Order ID: " << newOrder.orderID << endl;
-    cout << "Total Harga: Rp" << newOrder.totalPrice << endl;
-    cout << "Delivery Fee: Rp" << newOrder.deliveryFee << endl;
-    cout << "Alamat: " << newOrder.address << endl;
-}
-
-// Fungsi lihat riwayat
-void lihatRiwayat(string username) {
-    bool found = false;
-    for (auto o : orders) {
-        if (o.username == username) {
-            found = true;
-            cout << "\nOrder ID: " << o.orderID << endl;
-            cout << "Layanan: ";
-            switch (o.serviceType) {
-                case 1: cout << "Cuci Kering"; break;
-                case 2: cout << "Cuci Lipat"; break;
-                case 3: cout << "Setrika"; break;
-                case 4: cout << "Express"; break;
-                default: cout << "Tidak diketahui";
-            }
-            cout << "\nBerat: " << o.weight << " kg" << endl;
-            cout << "Harga per kg: Rp" << o.pricePerKg << endl;
-            cout << "Biaya Kirim: Rp" << o.deliveryFee << endl;
-            cout << "Total: Rp" << o.totalPrice << endl;
-            cout << "Tanggal: " << ctime(&o.orderTime);
-            cout << "Status Pengiriman: " << o.deliveryStatus << endl;
-            if (o.rating > 0) {
-                cout << "Rating: " << o.rating << "/5\nUlasan: " << o.review << endl;
-            }
-        }
+    cout << "Nama Alat: ";
+    getline(cin, alatBaru.nama);
+    cout << "Kategori: ";
+    getline(cin, alatBaru.kategori);
+    cout << "Harga per Hari: ";
+    while (!(cin >> alatBaru.hargaPerHari) || alatBaru.hargaPerHari <= 0) {
+        cout << "Input tidak valid! Masukkan angka positif: ";
+        cin.clear();
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
     }
-    if (!found)
-        cout << "Belum ada riwayat pesanan.\n";
+    cout << "Stok: ";
+    while (!(cin >> alatBaru.stok) || alatBaru.stok < 0) {
+        cout << "Input tidak valid! Masukkan angka non-negatif: ";
+        cin.clear();
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+    }
+    alatBaru.totalDisewa = 0;
+    alatBaru.tersedia = true;
+    daftarAlat[jumlahAlat++] = alatBaru;
+    simpanDataAlatKeFile("alat.txt");
+    cout << "\nAlat berhasil ditambahkan dengan ID: " << alatBaru.id << "\n";
+    system("pause");
 }
 
-// Fungsi beri penilaian
-void beriPenilaian(string username) {
-    cout << "Masukkan Order ID yang ingin diberi ulasan: ";
-    string orderId;
-    cin >> orderId;
-
-    bool found = false;
-    for (auto &o : orders) {
-        if (o.username == username && o.orderID == orderId) {
-            cout << "Beri rating (1-5): ";
-            o.rating = validIntInput();
-            if (o.rating < 1 || o.rating > 5) {
-                cout << "Rating harus antara 1 sampai 5.\n";
-                continue;
+void editAlat() {
+    system("cls");
+    tampilkanDaftarAlat();
+    cout << "\nMasukkan ID alat yang akan diedit: ";
+    int id;
+    while (!(cin >> id)) {
+        cout << "Input tidak valid! Masukkan angka ID alat: ";
+        cin.clear();
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+    }
+    cin.ignore();
+    bool ditemukan = false;
+    for (int i = 0; i < jumlahAlat; i++) {
+        if (daftarAlat[i].id == id) {
+            ditemukan = true;
+            cout << "Nama baru (" << daftarAlat[i].nama << "): ";
+            string namaBaru;
+            getline(cin, namaBaru);
+            if (!namaBaru.empty()) daftarAlat[i].nama = namaBaru;
+            cout << "Kategori baru (" << daftarAlat[i].kategori << "): ";
+            string kategoriBaru;
+            getline(cin, kategoriBaru);
+            if (!kategoriBaru.empty()) daftarAlat[i].kategori = kategoriBaru;
+            cout << "Harga per Hari baru (" << daftarAlat[i].hargaPerHari << "): ";
+            string hargaStr;
+            getline(cin, hargaStr);
+            if (!hargaStr.empty()) {
+                float hargaBaru;
+                if (sscanf(hargaStr.c_str(), "%f", &hargaBaru) == 1 && hargaBaru > 0)
+                    daftarAlat[i].hargaPerHari = hargaBaru;
+                else
+                    cout << "Input harga tidak valid, data tidak diubah.\n";
             }
-            cout << "Masukkan ulasan: ";
-            cin.ignore();
-            getline(cin, o.review);
-            cout << "Ulasan berhasil ditambahkan!" << endl;
-            found = true;
+            cout << "Stok baru (" << daftarAlat[i].stok << "): ";
+            string stokStr;
+            getline(cin, stokStr);
+            if (!stokStr.empty()) {
+                int stokBaru;
+                if (sscanf(stokStr.c_str(), "%d", &stokBaru) == 1 && stokBaru >= 0)
+                    daftarAlat[i].stok = stokBaru;
+                else
+                    cout << "Stok harus non-negatif, data tidak diubah.\n";
+            }
+            simpanDataAlatKeFile("alat.txt");
+            cout << "\nData alat berhasil diperbarui!\n";
+            system("pause");
             break;
         }
     }
-    if (!found)
-        cout << "Order ID tidak ditemukan atau belum selesai." << endl;
+    if (!ditemukan) {
+        cout << "Alat dengan ID " << id << " tidak ditemukan.\n";
+        system("pause");
+    }
 }
 
-// Simpan data ke file
-void simpanData() {
-    ofstream outFile("orders.txt");
-    for (auto o : orders) {
-        outFile << o.username << ","
-                << o.orderID << ","
-                << o.serviceType << ","
-                << o.weight << ","
-                << o.pricePerKg << ","
-                << o.totalPrice << ","
-                << o.note << ","
-                << o.address << ","
-                << o.distance << ","
-                << o.deliveryFee << ","
-                << o.paymentMethod << ","
-                << o.orderTime << ","
-                << o.deliveryStatus << ","
-                << o.rating << ","
-                << o.review << "\n";
+void restokAlat() {
+    system("cls");
+    cout << "====================================\n";
+    cout << "           RESTOK ALAT              \n";
+    cout << "====================================\n";
+    tampilkanDaftarAlat();
+    cout << "\nMasukkan ID alat yang ingin direstok: ";
+    int id;
+    while (!(cin >> id)) {
+        cout << "Input tidak valid! Masukkan angka ID alat: ";
+        cin.clear();
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
     }
-    outFile.close();
-
-    ofstream userFile("users.txt");
-    for (auto u : users) {
-        userFile << u.username << "," << u.password << "," << (u.isAdmin ? "1" : "0") << "\n";
-    }
-    userFile.close();
-}
-
-// Muat data dari file
-void muatData() {
-    ifstream inFile("orders.txt");
-    string line;
-    while (getline(inFile, line)) {
-        Order o;
-        size_t pos = 0;
-        string token;
-        vector<string> tokens;
-
-        while ((pos = line.find(",")) != string::npos) {
-            token = line.substr(0, pos);
-            tokens.push_back(token);
-            line.erase(0, pos + 1);
+    bool ditemukan = false;
+    for (int i = 0; i < jumlahAlat; i++) {
+        if (daftarAlat[i].id == id) {
+            ditemukan = true;
+            cout << "Masukkan jumlah stok yang akan ditambahkan: ";
+            int tambahStok;
+            while (!(cin >> tambahStok) || tambahStok <= 0) {
+                cout << "Input tidak valid! Masukkan angka positif: ";
+                cin.clear();
+                cin.ignore(numeric_limits<streamsize>::max(), '\n');
+            }
+            daftarAlat[i].stok += tambahStok;
+            simpanDataAlatKeFile("alat.txt");
+            cout << "Stok alat \"" << daftarAlat[i].nama << "\" berhasil ditambah menjadi " << daftarAlat[i].stok << ".\n";
+            system("pause");
+            break;
         }
-        tokens.push_back(line); // Ambil sisa teks setelah koma terakhir
+    }
+    if (!ditemukan) {
+        cout << "Alat dengan ID " << id << " tidak ditemukan.\n";
+        system("pause");
+    }
+}
 
-        if (tokens.size() >= 13) {
-            o.username = tokens[0];
-            o.orderID = tokens[1];
-            o.serviceType = stoi(tokens[2]);
-            o.weight = stof(tokens[3]);
-            o.pricePerKg = stof(tokens[4]);
-            o.totalPrice = stof(tokens[5]);
-            o.note = tokens[6];
-            o.address = tokens[7];
-            o.distance = stof(tokens[8]);
-            o.deliveryFee = stof(tokens[9]);
-            o.paymentMethod = tokens[10];
-            o.orderTime = static_cast<time_t>(stol(tokens[11]));
-            o.deliveryStatus = tokens[12];
+void hapusAlat() {
+    system("cls");
+    tampilkanDaftarAlat();
+    cout << "\nMasukkan ID alat yang akan dihapus: ";
+    int id;
+    while (!(cin >> id)) {
+        cout << "Input tidak valid! Masukkan angka ID alat: ";
+        cin.clear();
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+    }
+    cin.ignore();
+    bool ditemukan = false;
+    for (int i = 0; i < jumlahAlat; i++) {
+        if (daftarAlat[i].id == id) {
+            for (int j = i; j < jumlahAlat - 1; j++) {
+                daftarAlat[j] = daftarAlat[j + 1];
+            }
+            jumlahAlat--;
+            ditemukan = true;
+            break;
+        }
+    }
+    simpanDataAlatKeFile("alat.txt");
+    if (ditemukan) {
+        cout << "Alat berhasil dihapus.\n";
+    } else {
+        cout << "Alat dengan ID " << id << " tidak ditemukan.\n";
+    }
+    system("pause");
+}
 
-            if (tokens.size() >= 14) {
-                o.rating = stoi(tokens[13]);
-                if (tokens.size() >= 15)
-                    o.review = tokens[14];
+void laporan() {
+    system("cls");
+    cout << "====================================\n";
+    cout << "          LAPORAN DATA              \n";
+    cout << "====================================\n";
+
+    // Laporan Alat Camping
+    cout << "\n--- Laporan Data Alat Camping ---\n";
+    cout << "ID | Nama Alat           | Kategori   | Harga/Hari | Stok | Total Disewa\n";
+    cout << "--------------------------------------------------------------------------\n";
+    for (int i = 0; i < jumlahAlat; i++) {
+        AlatCamping a = daftarAlat[i];
+        cout << a.id << "  | " << a.nama;
+        for (int j = 0; j < 20 - (int)a.nama.size(); j++) cout << " ";
+        cout << "| " << a.kategori;
+        for (int j = 0; j < 11 - (int)a.kategori.size(); j++) cout << " ";
+        cout << "| " << a.hargaPerHari << "    | "
+             << a.stok << "   | " << a.totalDisewa << "\n";
+    }
+
+    // Laporan Penyewaan
+    cout << "\n--- Laporan Data Penyewaan ---\n";
+    if (jumlahPenyewa == 0) {
+        cout << "Belum ada data penyewaan.\n";
+    } else {
+        float totalPendapatan = 0;
+        float totalDenda = 0;
+        float totalDiskon = 0;
+        
+        for (int i = 0; i < jumlahPenyewa; i++) {
+            Penyewa p = daftarPenyewa[i];
+            cout << "ID Penyewa: " << p.id << " | Nama: " << p.nama
+                 << " | No HP: " << p.noHP << " | Reguler: " << (p.isReguler ? "Ya" : "Tidak") << endl;
+            cout << "  Tanggal Sewa: " << formatTanggal(p.tanggalSewa) 
+                 << " | Durasi: " << p.durasiSewa << " hari"
+                 << " | Kembali: " << formatTanggal(p.tanggalKembali) << endl;
+            cout << "  Status: " << (p.sudahKembali ? "Sudah Kembali" : "Belum Kembali") << endl;
+            cout << "  Alat yang disewa:\n";
+            for (int j = 0; j < p.jumlahJenisAlat; j++) {
+                string namaAlat = "-";
+                for (int k = 0; k < jumlahAlat; k++) {
+                    if (daftarAlat[k].id == p.alatDisewa[j]) {
+                        namaAlat = daftarAlat[k].nama;
+                        break;
+                    }
+                }
+                cout << "    - " << namaAlat << " (ID: " << p.alatDisewa[j] 
+                     << "), Jumlah: " << p.jumlahSewa[j] << endl;
+            }
+            cout << "  Total Harga: Rp" << fixed << setprecision(2) << p.totalHarga << endl;
+            if (p.totalDiskon > 0) {
+                cout << "  Diskon: Rp" << fixed << setprecision(2) << p.totalDiskon << endl;
+            }
+            if (p.totalDenda > 0) {
+                cout << "  Denda: Rp" << fixed << setprecision(2) << p.totalDenda << endl;
+            }
+            cout << "  Total Bayar: Rp" << fixed << setprecision(2) 
+                 << (p.totalHarga - p.totalDiskon + p.totalDenda) << endl << endl;
+            
+            totalPendapatan += (p.totalHarga - p.totalDiskon + p.totalDenda);
+            totalDenda += p.totalDenda;
+            totalDiskon += p.totalDiskon;
+        }
+        
+        cout << "\n=== REKAPITULASI ===" << endl;
+        cout << "Total Pendapatan: Rp" << fixed << setprecision(2) << totalPendapatan << endl;
+        cout << "Total Denda: Rp" << fixed << setprecision(2) << totalDenda << endl;
+        cout << "Total Diskon: Rp" << fixed << setprecision(2) << totalDiskon << endl;
+    }
+    cout << "====================================\n";
+    system("pause");
+}
+
+void prosesPenyewaan() {
+    system("cls");
+    cout << "====================================\n";
+    cout << "          PROSES PENYEWAAN          \n";
+    cout << "====================================\n";
+    if (jumlahPenyewa >= MAX_PENYEWA) {
+        cout << "Maaf, kapasitas penyewa penuh.\n";
+        system("pause");
+        return;
+    }
+    
+    Penyewa penyewaBaru;
+    penyewaBaru.id = jumlahPenyewa + 1;
+    cin.ignore(numeric_limits<streamsize>::max(), '\n');
+    
+    cout << "Nama Penyewa: ";
+    getline(cin, penyewaBaru.nama);
+    
+    cout << "No HP: ";
+    getline(cin, penyewaBaru.noHP);
+    
+    // Check if customer is regular
+    cout << "Apakah penyewa reguler? (y/n): ";
+    char reguler;
+    cin >> reguler;
+    penyewaBaru.isReguler = (reguler == 'y' || reguler == 'Y');
+    cin.ignore();
+    
+    cout << "Tanggal Sewa (DD/MM/YYYY): ";
+    string tanggalStr;
+    getline(cin, tanggalStr);
+    penyewaBaru.tanggalSewa = parseTanggal(tanggalStr);
+    if (penyewaBaru.tanggalSewa == 0) {
+        cout << "Format tanggal salah, menggunakan tanggal hari ini.\n";
+        penyewaBaru.tanggalSewa = time(nullptr);
+    }
+    
+    cout << "Durasi sewa (hari): ";
+    while (!(cin >> penyewaBaru.durasiSewa) || penyewaBaru.durasiSewa <= 0) {
+        cout << "Input tidak valid! Masukkan angka positif: ";
+        cin.clear();
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+    }
+    cin.ignore();
+    
+    cout << "Jumlah jenis alat yang ingin disewa: ";
+    while (!(cin >> penyewaBaru.jumlahJenisAlat) || 
+           penyewaBaru.jumlahJenisAlat <= 0 || 
+           penyewaBaru.jumlahJenisAlat > MAX_ALAT_PER_SEWA) {
+        cout << "Input tidak valid! Masukkan antara 1 hingga " << MAX_ALAT_PER_SEWA << ": ";
+        cin.clear();
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+    }
+    cin.ignore();
+
+    penyewaBaru.totalHarga = 0;
+    penyewaBaru.totalDenda = 0;
+    penyewaBaru.totalDiskon = 0;
+    
+    for (int i = 0; i < penyewaBaru.jumlahJenisAlat; i++) {
+        tampilkanDaftarAlat();
+        int idAlat;
+        int jumlah;
+        cout << "Masukkan ID alat ke-" << (i+1) << ": ";
+        while (!(cin >> idAlat)) {
+            cout << "Input tidak valid! Masukkan ID alat yang benar: ";
+            cin.clear();
+            cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        }
+        cout << "Jumlah unit alat ke-" << (i+1) << ": ";
+        while (!(cin >> jumlah) || jumlah <= 0) {
+            cout << "Input tidak valid! Masukkan jumlah positif: ";
+            cin.clear();
+            cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        }
+
+        bool alatDitemukan = false;
+        for (int j = 0; j < jumlahAlat; j++) {
+            if (daftarAlat[j].id == idAlat) {
+                if (daftarAlat[j].stok >= jumlah) {
+                    daftarAlat[j].stok -= jumlah;
+                    daftarAlat[j].totalDisewa += jumlah;
+                    
+                    float subtotal = daftarAlat[j].hargaPerHari * jumlah * penyewaBaru.durasiSewa;
+                    penyewaBaru.totalHarga += subtotal;
+                    
+                    penyewaBaru.alatDisewa[i] = idAlat;
+                    penyewaBaru.jumlahSewa[i] = jumlah;
+                    alatDitemukan = true;
+                } else {
+                    cout << "Stok tidak cukup.\n";
+                    i--;  // Ulangi input untuk alat ini
+                }
+                break;
+            }
+        }
+        if (!alatDitemukan) {
+            cout << "Alat tidak ditemukan.\n";
+            i--;
+        }
+    }
+    
+    // Apply discount if eligible
+    if (penyewaBaru.isReguler && penyewaBaru.durasiSewa >= MIN_HARI_DISKON) {
+        penyewaBaru.totalDiskon = penyewaBaru.totalHarga * DISKON_REGULER;
+        cout << "\nDiskon " << (DISKON_REGULER*100) << "% diberikan untuk pelanggan reguler.\n";
+    }
+    
+    penyewaBaru.sudahKembali = false;
+    penyewaBaru.tanggalKembali = 0;
+    daftarPenyewa[jumlahPenyewa++] = penyewaBaru;
+    
+    simpanDataAlatKeFile("alat.txt");
+    simpanDataPenyewaKeFile("penyewa.txt");
+    
+    cout << "\n=== RINCIAN PENYEWAAN ===" << endl;
+    cout << "ID Penyewa: " << penyewaBaru.id << endl;
+    cout << "Total Harga: Rp" << fixed << setprecision(2) << penyewaBaru.totalHarga << endl;
+    if (penyewaBaru.totalDiskon > 0) {
+        cout << "Diskon: Rp" << fixed << setprecision(2) << penyewaBaru.totalDiskon << endl;
+    }
+    cout << "Total Bayar: Rp" << fixed << setprecision(2) 
+         << (penyewaBaru.totalHarga - penyewaBaru.totalDiskon) << endl;
+    cout << "Tanggal Kembali: " << formatTanggal(penyewaBaru.tanggalSewa + penyewaBaru.durasiSewa * 24 * 60 * 60) << endl;
+    cout << "\nPenyewaan berhasil dicatat!\n";
+    system("pause");
+}
+
+void prosesPengembalian() {
+    system("cls");
+    cout << "====================================\n";
+    cout << "         PROSES PENGEMBALIAN        \n";
+    cout << "====================================\n";
+
+    if (jumlahPenyewa == 0) {
+        cout << "Belum ada data penyewa.\n";
+        system("pause");
+        return;
+    }
+
+    cout << "Masukkan ID penyewa: ";
+    int idPenyewa;
+    while (!(cin >> idPenyewa)) {
+        cout << "Input tidak valid! Masukkan angka ID penyewa: ";
+        cin.clear();
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+    }
+    cin.ignore();
+    
+    bool ditemukan = false;
+    for (int i = 0; i < jumlahPenyewa; i++) {
+        if (daftarPenyewa[i].id == idPenyewa) {
+            ditemukan = true;
+
+            if (daftarPenyewa[i].sudahKembali) {
+                cout << "\nAlat dengan ID penyewa " << idPenyewa << " sudah dikembalikan sebelumnya.\n";
+                system("pause");
+                return;
             }
 
-            orders.push_back(o);
+            cout << "\nData Penyewa: " << daftarPenyewa[i].nama << " (HP: " << daftarPenyewa[i].noHP << ")\n";
+            cout << "Tanggal Sewa: " << formatTanggal(daftarPenyewa[i].tanggalSewa) << endl;
+            cout << "Durasi Sewa: " << daftarPenyewa[i].durasiSewa << " hari\n";
+            
+            // Input return date
+            cout << "Tanggal Pengembalian (DD/MM/YYYY): ";
+            string tanggalStr;
+            getline(cin, tanggalStr);
+            time_t tanggalKembali = parseTanggal(tanggalStr);
+            if (tanggalKembali == 0) {
+                cout << "Format tanggal salah, menggunakan tanggal hari ini.\n";
+                tanggalKembali = time(nullptr);
+            }
+            daftarPenyewa[i].tanggalKembali = tanggalKembali;
+            
+            // Calculate late days
+            time_t seharusnyaKembali = daftarPenyewa[i].tanggalSewa + daftarPenyewa[i].durasiSewa * 24 * 60 * 60;
+            int hariTerlambat = hitungHariTerlambat(tanggalKembali, seharusnyaKembali);
+            
+            // Calculate penalty if late
+            if (hariTerlambat > 0) {
+                float denda = 0;
+                for (int j = 0; j < daftarPenyewa[i].jumlahJenisAlat; j++) {
+                    for (int k = 0; k < jumlahAlat; k++) {
+                        if (daftarAlat[k].id == daftarPenyewa[i].alatDisewa[j]) {
+                            denda += daftarAlat[k].hargaPerHari * daftarPenyewa[i].jumlahSewa[j] * hariTerlambat * DENDA_PER_HARI;
+                            break;
+                        }
+                    }
+                }
+                daftarPenyewa[i].totalDenda = denda;
+                cout << "\nPenyewa terlambat mengembalikan selama " << hariTerlambat << " hari.\n";
+                cout << "Denda yang dikenakan: Rp" << fixed << setprecision(2) << denda << endl;
+            }
+            
+            // Return items to stock
+            for (int j = 0; j < daftarPenyewa[i].jumlahJenisAlat; j++) {
+                int idAlat = daftarPenyewa[i].alatDisewa[j];
+                int jumlah = daftarPenyewa[i].jumlahSewa[j];
+
+                for (int k = 0; k < jumlahAlat; k++) {
+                    if (daftarAlat[k].id == idAlat) {
+                        daftarAlat[k].stok += jumlah;
+                        cout << "- " << daftarAlat[k].nama << " (" << jumlah << " unit) berhasil dikembalikan.\n";
+                        break;
+                    }
+                }
+            }
+
+            daftarPenyewa[i].sudahKembali = true;
+            simpanDataAlatKeFile("alat.txt");
+            simpanDataPenyewaKeFile("penyewa.txt");
+            
+            cout << "\n=== RINCIAN PEMBAYARAN ===" << endl;
+            cout << "Total Harga Sewa: Rp" << fixed << setprecision(2) << daftarPenyewa[i].totalHarga << endl;
+            if (daftarPenyewa[i].totalDiskon > 0) {
+                cout << "Diskon: Rp" << fixed << setprecision(2) << daftarPenyewa[i].totalDiskon << endl;
+            }
+            if (daftarPenyewa[i].totalDenda > 0) {
+                cout << "Denda: Rp" << fixed << setprecision(2) << daftarPenyewa[i].totalDenda << endl;
+            }
+            cout << "Total Bayar: Rp" << fixed << setprecision(2) 
+                 << (daftarPenyewa[i].totalHarga - daftarPenyewa[i].totalDiskon + daftarPenyewa[i].totalDenda) << endl;
+            cout << "\nPengembalian alat berhasil dicatat.\n";
+            system("pause");
+            break;
         }
     }
-    inFile.close();
+    if (!ditemukan) {
+        cout << "Penyewa dengan ID " << idPenyewa << " tidak ditemukan.\n";
+        system("pause");
+    }
+}
 
-    ifstream userFile("users.txt");
-    string userLine;
-    while (getline(userFile, userLine)) {
-        User u;
-        vector<string> tokens;
-        size_t pos = 0;
-
-        while ((pos = userLine.find(",")) != string::npos) {
-            tokens.push_back(userLine.substr(0, pos));
-            userLine.erase(0, pos + 1);
-        }
-        tokens.push_back(userLine); // Ambil sisa teks
-
-        if (tokens.size() >= 3) {
-            u.username = tokens[0];
-            u.password = tokens[1];
-            u.isAdmin = (tokens[2] == "1");
-            users.push_back(u);
+void cariPenyewa() {
+    system("cls");
+    cout << "====================================\n";
+    cout << "         PENCARIAN PENYEWA          \n";
+    cout << "====================================\n";
+    
+    if (jumlahPenyewa == 0) {
+        cout << "Belum ada data penyewa.\n";
+        system("pause");
+        return;
+    }
+    
+    cout << "Masukkan ID atau nama penyewa: ";
+    string query;
+    cin.ignore();
+    getline(cin, query);
+    
+    bool ditemukan = false;
+    for (int i = 0; i < jumlahPenyewa; i++) {
+        if (to_string(daftarPenyewa[i].id) == query || 
+            daftarPenyewa[i].nama.find(query) != string::npos) {
+            ditemukan = true;
+            Penyewa p = daftarPenyewa[i];
+            cout << "\nID Penyewa: " << p.id << endl;
+            cout << "Nama: " << p.nama << endl;
+            cout << "No HP: " << p.noHP << endl;
+            cout << "Status: " << (p.sudahKembali ? "Sudah Kembali" : "Belum Kembali") << endl;            cout << "Tanggal Sewa: " << formatTanggal(p.tanggalSewa) << endl;
+            cout << "Durasi Sewa: " << p.durasiSewa << " hari" << endl;
+            cout << "Tanggal Kembali: " << formatTanggal(p.tanggalKembali) << endl;
+            cout << "Alat yang disewa:" << endl;
+            for (int j = 0; j < p.jumlahJenisAlat; j++) {
+                string namaAlat = "-";
+                for (int k = 0; k < jumlahAlat; k++) {
+                    if (daftarAlat[k].id == p.alatDisewa[j]) {
+                        namaAlat = daftarAlat[k].nama;
+                        break;
+                    }
+                }
+                cout << " - " << namaAlat << " (" << p.jumlahSewa[j] << " unit)" << endl;
+            }
+            cout << "Total Harga: Rp" << fixed << setprecision(2) << p.totalHarga << endl;
+            if (p.totalDiskon > 0)
+                cout << "Diskon: Rp" << fixed << setprecision(2) << p.totalDiskon << endl;
+            if (p.totalDenda > 0)
+                cout << "Denda: Rp" << fixed << setprecision(2) << p.totalDenda << endl;
+            cout << "Total Bayar: Rp" << fixed << setprecision(2)
+                 << (p.totalHarga - p.totalDiskon + p.totalDenda) << endl;
         }
     }
-    userFile.close();
+
+    if (!ditemukan) {
+        cout << "Penyewa tidak ditemukan." << endl;
+    }
+
+    system("pause");
+}
+void tampilkanMenuAdmin() {
+    system("cls");
+    cout << "====================================" << endl;
+    cout << "           MENU ADMIN               " << endl;
+    cout << "====================================" << endl;
+    cout << "1. Tambah Alat" << endl;
+    cout << "2. Edit Alat" << endl;
+    cout << "3. Restok Alat" << endl;
+    cout << "4. Hapus Alat" << endl;
+    cout << "5. Proses Penyewaan" << endl;
+    cout << "6. Proses Pengembalian" << endl;
+    cout << "7. Laporan Data" << endl;
+    cout << "8. Logout" << endl;
+    cout << "Pilih menu: ";
+}
+
+void tampilkanMenuKasir() {
+    system("cls");
+    cout << "====================================" << endl;
+    cout << "           MENU KASIR               " << endl;
+    cout << "====================================" << endl;
+    cout << "1. Tampilkan Daftar Alat" << endl;
+    cout << "2. Proses Penyewaan" << endl;
+    cout << "3. Proses Pengembalian" << endl;
+    cout << "4. Cari Penyewa" << endl;
+    cout << "5. Logout" << endl;
+    cout << "Pilih menu: ";
+}
+
+void menuUtama() {
+    while (true) {
+        if (!isLoggedIn) {
+            login();
+            if (!isLoggedIn) continue;
+        }
+
+        if (userAktif.role == "admin") {
+            int pilihan;
+            do {
+                tampilkanMenuAdmin();
+                cin >> pilihan;
+
+                switch (pilihan) {
+                    case 1: tambahAlat(); break;
+                    case 2: editAlat(); break;
+                    case 3: restokAlat(); break;
+                    case 4: hapusAlat(); break;
+                    case 5: prosesPenyewaan(); break;
+                    case 6: prosesPengembalian(); break;
+                    case 7: laporan(); break;
+                    case 8: logout(); break;
+                    default: cout << "Pilihan tidak valid!" << endl; system("pause"); break;
+                }
+            } while (pilihan != 8 && isLoggedIn);
+        } else if (userAktif.role == "kasir") {
+            int pilihan;
+            do {
+                tampilkanMenuKasir();
+                cin >> pilihan;
+
+                switch (pilihan) {
+                    case 1: tampilkanDaftarAlat(); break;
+                    case 2: prosesPenyewaan(); break;
+                    case 3: prosesPengembalian(); break;
+                    case 4: cariPenyewa(); break;
+                    case 5: logout(); break;
+                    default: cout << "Pilihan tidak valid!" << endl; system("pause"); break;
+                }
+            } while (pilihan != 5 && isLoggedIn);
+        }
+    }
+}
+int main() {
+    loadDataAlatDariFile("alat.txt");
+    muatDataPenyewaDariFile("penyewa.txt");
+
+    menuUtama();
+
+    return 0;
 }
