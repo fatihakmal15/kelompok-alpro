@@ -3,7 +3,7 @@
 #include <string>
 #include <limits>
 #include <vector>
-#include <fstream> // Untuk file handling
+#include <fstream>
  
 using namespace std;
  
@@ -173,6 +173,18 @@ void tampilkanSemuaKTPRekursif(const vector<KTP> &dataKTP, int indeks = 0) {
     tampilkanSemuaKTPRekursif(dataKTP, indeks + 1);
 }
  
+void cariKTP(const vector<KTP> &dataKTP) {
+    int cari;
+    cout << "Masukkan nomor KTP yang ingin ditampilkan (1 - " << dataKTP.size() << "): ";
+    cin >> cari;
+
+    if (cari >= 1 && cari <= dataKTP.size()) {
+        displayKTP(dataKTP[cari - 1], cari - 1);
+    } else {
+        cout << "Nomor KTP tidak ditemukan!\n";
+    }
+}
+
 void simpanDataKeFile(const vector<KTP> &dataKTP) {
     ofstream file("data_ktp.txt");
     if (!file) {
@@ -243,10 +255,22 @@ int main() {
         clearInputBuffer();
     }
  
-    // Simpan data ke file setelah selesai input/edit
+
     simpanDataKeFile(dataKTP);
- 
+ 	
+ 	char cari;
+cout << "\nApakah Anda ingin mencari dan menampilkan data tertentu? (y/n): ";
+cin >> cari;
+clearInputBuffer();
+
+while (cari == 'y' || cari == 'Y') {
+    cariKTP(dataKTP);
+
+    cout << "\nIngin mencari data lain? (y/n): ";
+    cin >> cari;
+    clearInputBuffer();
+}
+
     cout << "\nTerima kasih.\n";
     return 0;
 }
- 
