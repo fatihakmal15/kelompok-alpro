@@ -1,6 +1,6 @@
 #include <iostream>
 #include <iomanip>
-#include <string>
+#include <sstream>
 #include <limits>
 #include <vector>
 #include <fstream>
@@ -106,7 +106,7 @@ void displayKTP(const KTP &ktp, int index = -1) {
     cout << left << setw(20) << "NIK" << ": " << ktp.nik << endl;
     cout << left << setw(20) << "Nama" << ": " << ktp.nama << endl;
     cout << left << setw(20) << "Tempat/Tgl Lahir" << ": " << ktp.tempat_tgl_lahir << endl;
-    cout << left << setw(20) << "Jenis Kelamin" << ": " 
+    cout << left << setw(20) << "Jenis Kelamin" << ": "
          << (ktp.jenis_kelamin ? "Laki-laki" : "Perempuan")
          << "    Gol Darah: " << ktp.gol_darah << endl;
     cout << left << setw(20) << "Alamat" << ": " << ktp.alamat << endl;
@@ -177,14 +177,14 @@ void cariKTP(const vector<KTP> &dataKTP) {
     int cari;
     cout << "Masukkan nomor KTP yang ingin ditampilkan (1 - " << dataKTP.size() << "): ";
     cin >> cari;
-
+ 
     if (cari >= 1 && cari <= dataKTP.size()) {
         displayKTP(dataKTP[cari - 1], cari - 1);
     } else {
         cout << "Nomor KTP tidak ditemukan!\n";
     }
 }
-
+ 
 void simpanDataKeFile(const vector<KTP> &dataKTP) {
     ofstream file("data_ktp.txt");
     if (!file) {
@@ -216,6 +216,24 @@ void simpanDataKeFile(const vector<KTP> &dataKTP) {
     cout << "Data berhasil disimpan ke file data_ktp.txt\n";
 }
  
+void tampilkanRingkasanArray(string arr[][5], int jumlah) {
+    cout << "\n== RINGKASAN DATA KTP ==\n";
+    cout << left << setw(5) << "No"
+         << setw(20) << "NIK"
+         << setw(20) << "Nama"
+         << setw(15) << "Jenis Kelamin"
+         << setw(25) << "Alamat"
+         << setw(20) << "Pekerjaan" << endl;
+    for (int i = 0; i < jumlah; i++) {
+        cout << left << setw(5) << i + 1
+             << setw(20) << arr[i][0]
+             << setw(20) << arr[i][1]
+             << setw(15) << arr[i][2]
+             << setw(25) << arr[i][3]
+             << setw(20) << arr[i][4] << endl;
+    }
+}
+ 
 int main() {
     int jumlah;
     cout << "Berapa banyak KTP yang ingin dibuat? ";
@@ -223,10 +241,19 @@ int main() {
     clearInputBuffer();
  
     vector<KTP> dataKTP(jumlah);
+    string dataArray[100][5]; // Tambahan array 2 dimensi
  
     for (int i = 0; i < jumlah; i++) {
         cout << "\nData ke-" << i + 1 << endl;
         inputKTP(dataKTP[i]);
+ 
+        stringstream ss;
+		ss << dataKTP[i].nik;
+		dataArray[i][0] = ss.str();
+        dataArray[i][1] = dataKTP[i].nama;
+        dataArray[i][2] = dataKTP[i].jenis_kelamin ? "Laki-laki" : "Perempuan";
+        dataArray[i][3] = dataKTP[i].alamat;
+        dataArray[i][4] = dataKTP[i].pekerjaan;
     }
  
     cout << "\n=== Semua Data KTP ===\n";
@@ -255,22 +282,23 @@ int main() {
         clearInputBuffer();
     }
  
-
     simpanDataKeFile(dataKTP);
- 	
- 	char cari;
-cout << "\nApakah Anda ingin mencari dan menampilkan data tertentu? (y/n): ";
-cin >> cari;
-clearInputBuffer();
-
-while (cari == 'y' || cari == 'Y') {
-    cariKTP(dataKTP);
-
-    cout << "\nIngin mencari data lain? (y/n): ";
+ 
+    char cari;
+    cout << "\nApakah Anda ingin mencari dan menampilkan data tertentu? (y/n): ";
     cin >> cari;
     clearInputBuffer();
-}
-
+ 
+    while (cari == 'y' || cari == 'Y') {
+        cariKTP(dataKTP);
+        cout << "\nIngin mencari data lain? (y/n): ";
+        cin >> cari;
+        clearInputBuffer();
+    }
+ 
+    // Tampilkan ringkasan dari array 2D
+    tampilkanRingkasanArray(dataArray, jumlah);
+ 
     cout << "\nTerima kasih.\n";
     return 0;
 }
